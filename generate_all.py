@@ -489,7 +489,8 @@ class AllReportsApp:
     def __init__(self, root):
         self.root = root
         self.root.title("财富管理部喜报生成器")
-        self.root.geometry("600x400")
+        # 调整窗口大小以适应新布局
+        self.root.geometry("700x550")
         self.root.resizable(False, False)
 
         base_dir = get_base_dir()
@@ -510,59 +511,106 @@ class AllReportsApp:
         self.root.geometry(f"+{x}+{y}")
 
     def _build_ui(self):
-        # 标题区
-        title_frame = tk.Frame(self.root, bg="#2c3e50", height=80)
-        title_frame.pack(fill="x")
-        title_frame.pack_propagate(False)
-        tk.Label(
-            title_frame, text="📊 财富管理部喜报生成器",
-            font=("微软雅黑", 20, "bold"), fg="white", bg="#2c3e50"
-        ).pack(expand=True)
-        tk.Label(
-            title_frame, text="简单、快速、自动化的报表工具",
-            font=("微软雅黑", 10), fg="#bdc3c7", bg="#2c3e50"
-        ).pack(side="bottom", pady=5)
+        # --- 配色方案 (Premium Red) ---
+        COLOR_PRIMARY = "#B22222"    # Firebrick / Deep Red
+        COLOR_ACCENT = "#FFD700"     # Gold
+        COLOR_BG = "#F5F5F5"         # White Smoke
+        COLOR_CARD = "#FFFFFF"       # Pure White
+        COLOR_TEXT = "#333333"       # Dark Gray
+        COLOR_TEXT_LIGHT = "#7F8C8D" # Light Gray
+        COLOR_BTN_HOVER = "#8B0000"  # Dark Red for hover
 
-        # 内容区
-        main = tk.Frame(self.root, padx=30, pady=30)
-        main.pack(fill="both", expand=True)
+        # 字体配置 (跨平台兼容)
+        FONT_TITLE = ("Microsoft YaHei UI", 24, "bold") if sys.platform == "win32" else ("PingFang SC", 24, "bold")
+        FONT_SUBTITLE = ("Microsoft YaHei UI", 12) if sys.platform == "win32" else ("PingFang SC", 12)
+        FONT_LABEL = ("Microsoft YaHei UI", 11) if sys.platform == "win32" else ("PingFang SC", 11)
+        FONT_ENTRY = ("Microsoft YaHei UI", 10) if sys.platform == "win32" else ("PingFang SC", 10)
+        FONT_BTN_LARGE = ("Microsoft YaHei UI", 14, "bold") if sys.platform == "win32" else ("PingFang SC", 14, "bold")
+        FONT_BTN_SMALL = ("Microsoft YaHei UI", 10) if sys.platform == "win32" else ("PingFang SC", 10)
 
-        # 模板选择
-        tk.Label(main, text="喜报模版文件（PPTX）:", font=("微软雅黑", 10, "bold")).grid(row=0, column=0, sticky="w", pady=5)
-        self.template_var = tk.StringVar(value=self.default_template)
-        tk.Entry(main, textvariable=self.template_var, width=40, font=("微软雅黑", 9)).grid(row=0, column=1, padx=5)
-        tk.Button(main, text="浏览...", command=self._browse_template).grid(row=0, column=2)
-
-        # 数据选择
-        tk.Label(main, text="数据文件 (Excel/CSV):", font=("微软雅黑", 10, "bold")).grid(row=1, column=0, sticky="w", pady=10)
-        self.data_var = tk.StringVar(value=self.default_data)
-        tk.Entry(main, textvariable=self.data_var, width=40, font=("微软雅黑", 9)).grid(row=1, column=1, padx=5)
-        tk.Button(main, text="浏览...", command=self._browse_data).grid(row=1, column=2)
-
-        # 进度条
-        self.progress = ttk.Progressbar(main, length=520, mode="determinate")
-        self.progress.grid(row=2, column=0, columnspan=3, pady=(20, 5))
+        self.root.configure(bg=COLOR_BG)
         
-        self.status_var = tk.StringVar(value="准备就绪")
-        tk.Label(main, textvariable=self.status_var, fg="#7f8c8d", font=("微软雅黑", 9)).grid(row=3, column=0, columnspan=3)
+        # 初始化变量
+        self.template_var = tk.StringVar(value=self.default_template)
+        self.data_var = tk.StringVar(value=self.default_data)
 
-        # 按钮
-        btn_frame = tk.Frame(main)
-        btn_frame.grid(row=4, column=0, columnspan=3, pady=20)
+        # --- 1. 顶部 Header 区域 ---
+        header_frame = tk.Frame(self.root, bg=COLOR_PRIMARY, height=120)
+        header_frame.pack(fill="x")
+        header_frame.pack_propagate(False) # 保持高度
 
+        # 标题 (金字红底)
+        tk.Label(
+            header_frame, text="✨ 财富管理部 · 喜报生成 ✨",
+            font=FONT_TITLE, fg=COLOR_ACCENT, bg=COLOR_PRIMARY
+        ).pack(expand=True, pady=(20, 0))
+
+        # 副标题 (白字红底)
+        tk.Label(
+            header_frame, text="简单、快速、自动化的喜报生成工具",
+            font=FONT_SUBTITLE, fg="white", bg=COLOR_PRIMARY
+        ).pack(side="bottom", pady=(0, 15))
+
+        # --- 2. 核心内容 Card 区域 ---
+        card_frame = tk.Frame(self.root, bg=COLOR_CARD, padx=40, pady=40)
+        card_frame.pack(pady=30, padx=30, fill="both", expand=True)
+        
+        # 模拟卡片阴影效果 (通过 border)
+        card_frame.configure(highlightbackground="#E0E0E0", highlightthickness=1)
+
+        # 辅助函数：创建美化的输入行
+        def create_input_row(parent, label_text, var, cmd):
+            row = tk.Frame(parent, bg=COLOR_CARD)
+            row.pack(fill="x", pady=12)
+            
+            # 增加 width=22 以容纳更长的标签文字
+            tk.Label(row, text=label_text, font=FONT_LABEL, fg=COLOR_TEXT, bg=COLOR_CARD, width=22, anchor="w")\
+                .pack(side="left")
+            
+            entry = tk.Entry(row, textvariable=var, font=FONT_ENTRY, bg="#FAFAFA", relief="flat", highlightthickness=1, highlightbackground="#CCCCCC")
+            entry.pack(side="left", fill="x", expand=True, ipady=5, padx=10)
+            
+            tk.Button(row, text="📂 选择", command=cmd, font=FONT_BTN_SMALL, bg="#EEEEEE", relief="flat", cursor="hand2")\
+                .pack(side="right", padx=5)
+
+        create_input_row(card_frame, "模板文件 (PPTX)", self.template_var, self._browse_template)
+        create_input_row(card_frame, "数据源文件 (CSV/XLSX)", self.data_var, self._browse_data)
+
+        # 进度条 (定制样式)
+        style = ttk.Style()
+        style.theme_use('default')
+        style.configure("Red.Horizontal.TProgressbar", background=COLOR_PRIMARY, thickness=10)
+        
+        self.progress = ttk.Progressbar(card_frame, length=100, mode="determinate", style="Red.Horizontal.TProgressbar")
+        self.progress.pack(fill="x", pady=(30, 8))
+        
+        # 状态文字
+        self.status_var = tk.StringVar(value="准备就绪，等待指令...")
+        status_lbl = tk.Label(card_frame, textvariable=self.status_var, font=FONT_LABEL, fg=COLOR_TEXT_LIGHT, bg=COLOR_CARD)
+        status_lbl.pack()
+
+        # --- 3. 底部 Action 区域 ---
+        action_frame = tk.Frame(self.root, bg=COLOR_BG)
+        action_frame.pack(fill="x", pady=20, padx=40)
+
+        # 主按钮 (大红)
         self.gen_btn = tk.Button(
-            btn_frame, text="🚀 一键生成完整报告", font=("微软雅黑", 14, "bold"),
-            bg="white", fg="black", padx=30, pady=10,
-            command=self._on_generate, cursor="hand2"
+            action_frame, text="🔥 生成完整战报",
+            font=FONT_BTN_LARGE, bg=COLOR_PRIMARY, fg="white",
+            activebackground="#8B0000", activeforeground="white", # 深红按压
+            relief="flat", cursor="hand2", padx=20, pady=10,
+            command=self._on_generate
         )
-        self.gen_btn.pack(side="left", padx=10)
+        self.gen_btn.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
+        # 次按钮 (透明/浅色)
         self.open_dir_btn = tk.Button(
-            btn_frame, text="📁 打开输出目录", font=("微软雅黑", 12, "bold"),
-            bg="white", fg="black", padx=20, pady=10,
-            command=self._open_output_dir, cursor="hand2"
+            action_frame, text="📂 打开输出喜报文件夹",
+            font=FONT_BTN_SMALL, bg="#E0E0E0", fg=COLOR_TEXT,
+            relief="flat", cursor="hand2", padx=20, pady=12,
+            command=self._open_output_dir
         )
-        self.open_dir_btn.pack(side="left", padx=10)
+        self.open_dir_btn.pack(side="right", fill="x", padx=(10, 0))
 
     def _browse_template(self):
         path = filedialog.askopenfilename(filetypes=[("PPTX 文件", "*.pptx")])
