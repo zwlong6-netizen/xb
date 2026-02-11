@@ -33,4 +33,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: XibaoTool-Images-Windows
-        path: "dist/财富管理部喜报工具(带图片导出).exe"
+        path: "dist/财富管理部喜报工具.exe"
