@@ -595,7 +595,7 @@ class AllReportsApp:
 
         # 主按钮 (大红)
         self.gen_btn = tk.Button(
-            action_frame, text="🔥 生成完整战报",
+            action_frame, text="🔥 生成完整喜报",
             font=FONT_BTN_LARGE, bg=COLOR_PRIMARY, fg="white",
             activebackground="#8B0000", activeforeground="white", # 深红按压
             relief="flat", cursor="hand2", padx=20, pady=10,
