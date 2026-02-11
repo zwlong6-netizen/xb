@@ -13,10 +13,10 @@ jobs:
 
     steps:
     - name: 检出代码
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: 设置 Python 3.10
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
@@ -30,7 +30,7 @@ jobs:
         pyinstaller --noconsole --onefile --name "财富管理部喜报工具" generate_all.py
 
     - name: 上传构建产物
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: 财富管理部喜报工具-Windows
         path: dist/财富管理部喜报工具.exe
