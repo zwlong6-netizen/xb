@@ -335,6 +335,11 @@ def process_summary_template(template_path, rows, output_dir, index):
     return part_path
 
 
+
+# =================================================================
+#  完整重写的 generate_full_report (返回 metadata版)
+# =================================================================
+
 def generate_full_report(template_path, data_path, output_path, progress_callback=None):
     rows = read_data_file(data_path)
     if not rows:
@@ -347,7 +352,7 @@ def generate_full_report(template_path, data_path, output_path, progress_callbac
         
     split_templates = split_template_by_slides(template_path, output_dir)
     
-    part_files = []
+    part_info_list = [] # List of (file_path, meta_list)
     
     for i, tmpl_path in enumerate(split_templates):
         prs = Presentation(tmpl_path)
@@ -357,16 +362,38 @@ def generate_full_report(template_path, data_path, output_path, progress_callbac
             progress_callback(i * (100 // len(split_templates)), 100, f"正在处理模板页 {i+1} ({t_type})...")
             
         part_file = None
+        current_meta = []
+        
         if t_type == "INDIVIDUAL":
             part_file = process_individual_template(tmpl_path, rows, output_dir, i)
+            # 生成了 len(rows) 张幻灯片
+            if part_file:
+                 for r_idx in range(len(rows)):
+                     current_meta.append({"type": "individual", "row_idx": r_idx})
+        
         elif t_type == "SUMMARY":
+            # 战报可能有多页，需要计算
+            grouped = group_data_for_zhanbao(rows)
+            # 计算页数 (虽然 process_summary_template 会处理，但我们需要 meta)
+            # 最准确的方法是读取生成的 PPT
             part_file = process_summary_template(tmpl_path, rows, output_dir, i)
+            
+            if part_file:
+                 try:
+                     tmp_p = Presentation(part_file)
+                     real_count = len(tmp_p.slides)
+                     for _ in range(real_count):
+                         current_meta.append({"type": "summary"})
+                 except:
+                     pass
+
         else:
             part_file = os.path.join(output_dir, f"part_{i}.pptx")
             prs.save(part_file)
+            current_meta.append({"type": "static"})
             
-        if part_file:
-            part_files.append(part_file)
+        if part_file and os.path.exists(part_file):
+            part_info_list.append((part_file, current_meta))
             
         try: os.remove(tmpl_path)
         except: pass
@@ -374,20 +401,28 @@ def generate_full_report(template_path, data_path, output_path, progress_callbac
     if progress_callback:
         progress_callback(90, 100, "正在合并所有部分...")
         
-    if not part_files:
-        return 0
+    if not part_info_list:
+        return 0, []
 
-    final_prs = Presentation(part_files[0])
-    for p_file in part_files[1:]:
+    # 合并
+    first_file, first_meta = part_info_list[0]
+    final_prs = Presentation(first_file)
+    final_meta = list(first_meta)
+    
+    for p_file, p_meta in part_info_list[1:]:
         copy_slides_from_pptx(final_prs, p_file)
+        final_meta.extend(p_meta)
         
     final_prs.save(output_path)
     
-    for p in part_files:
-        try: os.remove(p)
+    # 清理分块文件
+    try: os.remove(first_file)
+    except: pass
+    for p_file, _ in part_info_list[1:]:
+        try: os.remove(p_file)
         except: pass
 
-    return len(rows)
+    return len(rows), final_meta
 
 
 # ===== GUI =====
@@ -484,7 +519,7 @@ class AllReportsApp:
         self.export_imgs_var = tk.BooleanVar(value=False)
         chk = tk.Checkbutton(
             chk_frame, 
-            text="同时导出为图片 (需要本机安装 PowerPoint)", 
+            text="同时导出为图片 (需要本机安装 PowerPoint/WPS)", 
             variable=self.export_imgs_var,
             font=FONT_BTN_SMALL, bg=COLOR_CARD, fg=COLOR_TEXT,
             selectcolor=COLOR_CARD, activebackground=COLOR_CARD
@@ -568,9 +603,9 @@ class AllReportsApp:
         
         def run():
             try:
-                # 调用核心生成逻辑
-                count = generate_full_report(template, data_file, output, self._update_progress)
-                self.root.after(0, lambda: self._on_ppt_done(output, count))
+                # 调用核心生成逻辑 (现在返回 count, meta)
+                count, meta = generate_full_report(template, data_file, output, self._update_progress)
+                self.root.after(0, lambda: self._on_ppt_done(output, count, meta))
             except Exception as e:
                 err = str(e)
                 self.root.after(0, lambda: self._on_error(err))
@@ -582,19 +617,19 @@ class AllReportsApp:
         self.status_var.set(msg)
         self.root.update_idletasks()
 
-    def _on_ppt_done(self, output_path, count):
+    def _on_ppt_done(self, output_path, count, meta):
         """PPT 生成完毕，检查是否需要导出图片"""
         if not self.export_imgs_var.get():
             self._finish_all(output_path, count)
             return
 
-        self.status_var.set("📊 正在调用 PowerPoint 导出图片...")
+        self.status_var.set("📊 正在调用 PowerPoint/WPS 导出图片...")
         self.gen_btn.config(text="⏳ 正在导出图片...")
         
         # 启动转换线程
-        threading.Thread(target=self._convert_to_images_thread, args=(output_path, count)).start()
+        threading.Thread(target=self._convert_to_images_thread, args=(output_path, count, meta)).start()
 
-    def _convert_to_images_thread(self, pptx_path, count):
+    def _convert_to_images_thread(self, pptx_path, count, meta):
         try:
             base_name_no_ext = os.path.splitext(os.path.basename(pptx_path))[0]
             images_dir = os.path.join(os.path.dirname(pptx_path), f"{base_name_no_ext}_导出图片")
@@ -609,28 +644,74 @@ class AllReportsApp:
             # files_map: {slide_index (1-based): absolute_target_path}
             files_map = {}
             
-            # 1. 个人页 (1 ~ count)
-            for i, row in enumerate(rows):
+            # 获取日期范围用于战报命名
+            start_date, end_date = get_date_range(rows)
+            if start_date and end_date:
+                zhanbao_base_name = f"战报({start_date}-{end_date})"
+            else:
+                zhanbao_base_name = "战报"
+                
+            zhanbao_counter = 1
+            
+            # 使用 meta 信息构建 map
+            for i, m_info in enumerate(meta):
                 slide_idx = i + 1
-                branch = row.get("分行名称", "未知分行").strip()
-                manager = row.get("客户经理名称", "未知经理").strip()
-                fund = row.get("基金产品名称", "未知产品").strip()
-                safe_name = f"{branch}_{manager}_{fund}".replace("/", "_").replace("\\", "_").replace(":", "")
-                dst_path = os.path.join(images_dir, f"{safe_name}.jpg")
-                files_map[slide_idx] = dst_path
+                
+                if m_info["type"] == "individual":
+                    # 获取对应行数据
+                    try:
+                        r_idx = m_info["row_idx"]
+                        row = rows[r_idx]
+                        branch = row.get("分行名称", "未知分行").strip()
+                        manager = row.get("客户经理名称", "未知经理").strip()
+                        fund = row.get("基金产品名称", "未知产品").strip()
+                        safe_name = f"{branch}_{manager}_{fund}".replace("/", "_").replace("\\", "_").replace(":", "")
+                        
+                        # 如果有重复名字（比如同一个人的两个不同模板生成了2页），需要区分
+                        # 这里简单处理：如果 files_map 里已经有了同名的目标路径？
+                        # 其实我们的 files_map key 是 slide_idx，value 是 path
+                        # 如果 path 重复，覆盖会导致文件覆盖。
+                        # 我们检查一下当前目录是否已有同名意图
+                        
+                        base_fname = f"{safe_name}.jpg"
+                        # 检查此文件名是否已被此次任务的其他 slide 占用
+                        # 简单起见，如果前面的 slide 已经用了这个名字，我们加个后缀
+                        # (虽然通常一人一行数据只对应一组模板，但为了健壮性)
+                        target_path = os.path.join(images_dir, base_fname)
+                        
+                        # 检查已生成的 map 里有没有用过这个 path
+                        dup_count = 1
+                        while target_path in files_map.values():
+                            dup_count += 1
+                            target_path = os.path.join(images_dir, f"{safe_name}_{dup_count}.jpg")
+                            
+                        files_map[slide_idx] = target_path
+                    except:
+                        pass
+                
+                elif m_info["type"] == "summary":
+                    if zhanbao_counter == 1:
+                        fname = f"{zhanbao_base_name}.jpg"
+                    else:
+                        fname = f"{zhanbao_base_name}_{zhanbao_counter}.jpg"
+                    
+                    files_map[slide_idx] = os.path.join(images_dir, fname)
+                    zhanbao_counter += 1
+                
+                else:
+                    # static or unknown
+                    files_map[slide_idx] = os.path.join(images_dir, f"Slide_{slide_idx}.jpg")
 
-            # 2. 战报页 (count+1 ~ ???)
-            # 我们无法预知有多少战报页，除非打开PPT。
-            # 但我们可以告诉 Windows 转换函数：如果有更多页，就命名为 "战报_x.jpg"
             
             # --- 分平台处理 ---
+            # 注意：不再需要传递 count 或 zhanbao_base_name 给底层函数，因为 files_map 已经包含了所有信息
+            # 但为了兼容之前的 _convert_win32_direct 签名 (它用了 count 和 base_name 来处理 fallback)
+            # 我们应该修改 _convert_win32_direct 让它完全依赖 files_map，或者传入 dummy 值
+            
             if sys.platform == "win32":
-                # Windows (包含 WPS): 推荐使用逐页导出 (Slide.Export)
-                # 这样最稳定，不需要临时文件夹，也不会有存盘失败的问题
-                self._convert_win32_direct(pptx_path, files_map, images_dir, count)
+                self._convert_win32_direct(pptx_path, files_map, images_dir)
             else:
-                # Mac: 保持原有的 "全部导出 -> 重命名" 逻辑
-                self._convert_mac_workflow(pptx_path, files_map, images_dir, count)
+                self._convert_mac_workflow(pptx_path, files_map, images_dir)
                 
             self.root.after(0, lambda: self._finish_all(pptx_path, count, images_dir))
             
@@ -641,7 +722,7 @@ class AllReportsApp:
             self.root.after(0, lambda: messagebox.showwarning("部分完成", msg))
             self.root.after(0, lambda: self._finish_all(pptx_path, count))
 
-    def _convert_win32_direct(self, pptx_path, files_map, output_dir, count):
+    def _convert_win32_direct(self, pptx_path, files_map, output_dir):
         import win32com.client
         
         pptx_path = os.path.abspath(pptx_path)
@@ -650,13 +731,10 @@ class AllReportsApp:
         try:
             app = win32com.client.Dispatch("PowerPoint.Application")
         except:
-            # 尝试 WPS 专门的 ProgID
             try:
                 app = win32com.client.Dispatch("Kwpp.Application")
             except:
                 raise Exception("无法调用 PowerPoint 或 WPS，请确认已安装。")
-        
-        # app.Visible = True # 调试时可开启
         
         try:
             presentation = app.Presentations.Open(pptx_path, WithWindow=False)
@@ -664,37 +742,24 @@ class AllReportsApp:
             for i, slide in enumerate(presentation.Slides):
                 idx = i + 1
                 
-                # 确定输出路径
                 if idx in files_map:
                     target_path = files_map[idx]
                 else:
-                    # 超过数据的部分，认为是战报
-                    # 战报索引 = idx - count
-                    zhanbao_idx = idx - count
-                    if zhanbao_idx < 1: zhanbao_idx = 1 # 防御性
-                    target_path = os.path.join(output_dir, f"战报_{zhanbao_idx}.jpg")
+                    # 不再应该发生，因为 files_map 覆盖了 static
+                    target_path = os.path.join(output_dir, f"Extra_Slide_{idx}.jpg")
                 
-                # 确保路径是绝对路径
                 target_path = os.path.abspath(target_path)
-                
-                # 逐页导出
-                # FilterName="JPG", ScaleWidth/Height (可选)
-                # WPS 和 Office 都支持 Export
                 slide.Export(target_path, "JPG")
                 
             presentation.Close()
         except Exception as e:
-            # 尝试退出 app 吗？通常建议不要 Quit 用户打开的 App
-            # app.Quit() 
             raise e
 
-    def _convert_mac_workflow(self, pptx_path, files_map, images_dir, count):
+    def _convert_mac_workflow(self, pptx_path, files_map, images_dir):
         # Mac 依然使用 AppleScript 全量导出 + 重命名
-        # 1. 导出到临时文件夹
         temp_dir = os.path.join(images_dir, "temp_export_mac")
         if not os.path.exists(temp_dir): os.makedirs(temp_dir)
         
-        # 清空 temp
         import shutil
         for f in os.listdir(temp_dir):
             try: os.remove(os.path.join(temp_dir, f))
@@ -702,13 +767,7 @@ class AllReportsApp:
             
         self._convert_mac(pptx_path, temp_dir)
         
-        # 2. 重命名并移动
-        # 遍历 temp_dir 里的 SlideX.jpg
-        # 注意: Mac 可能生成 Slide1.JPG, Slide 1.jpg, etc.
-        # 我们直接按照 Slide Index 找文件
-        
-        for idx in range(1, 9999): # 假设上限
-            # 寻找 Slide{idx}.*
+        for idx in range(1, 9999): 
             found_src = None
             for ext in [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG"]:
                 t_path = os.path.join(temp_dir, f"Slide{idx}{ext}")
@@ -717,21 +776,17 @@ class AllReportsApp:
                     break
             
             if not found_src:
-                break # 找不到 Slide N，说明结束了
+                break
             
-            # 确定目标名
             if idx in files_map:
                 dst_path = files_map[idx]
             else:
-                zhanbao_idx = idx - count
-                if zhanbao_idx < 1: zhanbao_idx = 1
-                dst_path = os.path.join(images_dir, f"战报_{zhanbao_idx}.jpg")
+                dst_path = os.path.join(images_dir, f"Extra_Slide_{idx}.jpg")
             
             try:
                 shutil.move(found_src, dst_path)
             except: pass
             
-        # 3. 清理
         try: shutil.rmtree(temp_dir)
         except: pass
 
