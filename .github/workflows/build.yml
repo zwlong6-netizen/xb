@@ -32,5 +32,5 @@ jobs:
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
       with:
-        name: 财富管理部喜报工具-Windows
+        name: XibaoTool-Windows
         path: dist/财富管理部喜报工具.exe
