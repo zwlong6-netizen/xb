@@ -430,7 +430,7 @@ def generate_full_report(template_path, data_path, output_path, progress_callbac
 class AllReportsApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("财富管理部喜报生成器 (高级版)")
+        self.root.title("财富管理部喜报生成器")
         self.root.geometry("700x580") # 增加高度
         self.root.resizable(False, False)
 
@@ -739,6 +739,16 @@ class AllReportsApp:
         try:
             presentation = app.Presentations.Open(pptx_path, WithWindow=False)
             
+            # 获取原始尺寸 (Points)
+            sw = presentation.PageSetup.SlideWidth
+            sh = presentation.PageSetup.SlideHeight
+            
+            # 提高分辨率: 设置导出倍数
+            # 默认可能是 96DPI，甚至更低。设为 4 倍通常能达到高清效果
+            scale = 4
+            out_w = int(sw * scale)
+            out_h = int(sh * scale)
+            
             for i, slide in enumerate(presentation.Slides):
                 idx = i + 1
                 
@@ -749,7 +759,13 @@ class AllReportsApp:
                     target_path = os.path.join(output_dir, f"Extra_Slide_{idx}.jpg")
                 
                 target_path = os.path.abspath(target_path)
-                slide.Export(target_path, "JPG")
+                
+                try:
+                    # 尝试高清导出: slide.Export(FileName, FilterName, ScaleWidth, ScaleHeight)
+                    slide.Export(target_path, "JPG", out_w, out_h)
+                except:
+                    # 如果 WPS 或某些版本不支持宽高参数，回退到默认导出
+                    slide.Export(target_path, "JPG")
                 
             presentation.Close()
         except Exception as e:
