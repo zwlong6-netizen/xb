@@ -552,14 +552,14 @@ class AllReportsApp:
 
         self.gen_btn = tk.Button(
             btn_frame, text="🚀 一键生成完整报告", font=("微软雅黑", 14, "bold"),
-            bg="#27ae60", fg="black", padx=30, pady=10,
+            bg="white", fg="black", padx=30, pady=10,
             command=self._on_generate, cursor="hand2"
         )
         self.gen_btn.pack(side="left", padx=10)
 
         self.open_dir_btn = tk.Button(
             btn_frame, text="📁 打开输出目录", font=("微软雅黑", 12, "bold"),
-            bg="#34495e", fg="black", padx=20, pady=10,
+            bg="white", fg="black", padx=20, pady=10,
             command=self._open_output_dir, cursor="hand2"
         )
         self.open_dir_btn.pack(side="left", padx=10)
