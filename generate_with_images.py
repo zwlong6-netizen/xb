@@ -599,106 +599,141 @@ class AllReportsApp:
             base_name_no_ext = os.path.splitext(os.path.basename(pptx_path))[0]
             images_dir = os.path.join(os.path.dirname(pptx_path), f"{base_name_no_ext}_导出图片")
             
-            # 确保目标文件夹存在
             if not os.path.exists(images_dir):
                 os.makedirs(images_dir)
             
-            # 使用一个临时子文件夹来存放原始导出结果，避免直接污染/混淆
-            # PowerPoint SaveAs JPG 会自动创建一个同名文件夹
-            temp_export_name = "temp_export"
-            temp_export_path = os.path.join(images_dir, temp_export_name) # 这里作为一个文件路径传给 SaveAs，它会建文件夹
-
-            # 1. 导出 (到 temp_export 文件夹)
-            # 注意：SaveAs 第一个参数如果是 "C:/.../temp.jpg"，它会创建 "C:/.../temp" 文件夹，里面放 Slide1.jpg
-            if sys.platform == "win32":
-                # Windows: 传入 temp_export.jpg -> 创建 temp_export 文件夹
-                target_for_ppt = os.path.join(images_dir, "temp_export.jpg")
-                self._convert_win32(pptx_path, target_for_ppt)
-                # 实际生成的文件夹是 .../images_dir/temp_export/
-                actual_temp_dir = os.path.join(images_dir, "temp_export")
-            else:
-                # Mac: AppleScript save in "folder" usually dumps files directly or creates folder?
-                # 假设 Mac 也是创建同名文件夹，或者我们让它存到一个明确的临时文件夹
-                actual_temp_dir = os.path.join(images_dir, "temp_export_mac")
-                if not os.path.exists(actual_temp_dir):
-                    os.makedirs(actual_temp_dir)
-                self._convert_mac(pptx_path, actual_temp_dir)
-
-            # 2. 移动并重命名
-            if not os.path.exists(actual_temp_dir):
-                # 可能是 Mac 行为不同，或者 Windows 没成功
-                # 尝试直接在 images_dir 找 Slide1.jpg (兼容性防守)
-                actual_temp_dir = images_dir
-            
-            # 读取数据用于重命名
+            # --- 预先构建每一页及其对应的目标文件名 ---
             data_file = self.data_var.get()
             rows = read_data_file(data_file)
             
-            # 遍历所有 SlideX.jpg
-            # 假设总页数 = count (个人) + (total_slides - count) (战报)
-            # 我们直接遍历文件夹里的文件更稳妥
+            # files_map: {slide_index (1-based): absolute_target_path}
+            files_map = {}
             
-            import shutil
-            
-            # 2.1 处理个人页 (1 ~ count)
+            # 1. 个人页 (1 ~ count)
             for i, row in enumerate(rows):
                 slide_idx = i + 1
-                # 找 Slide{i}.jpg / Slide{i}.JPG
-                found_src = None
-                for ext in [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG"]:
-                    t_path = os.path.join(actual_temp_dir, f"Slide{slide_idx}{ext}")
-                    if os.path.exists(t_path):
-                        found_src = t_path
-                        break
-                
-                if found_src:
-                    branch = row.get("分行名称", "未知分行").strip()
-                    manager = row.get("客户经理名称", "未知经理").strip()
-                    fund = row.get("基金产品名称", "未知产品").strip()
-                    safe_name = f"{branch}_{manager}_{fund}".replace("/", "_").replace("\\", "_").replace(":", "")
-                    new_name = f"{safe_name}.jpg" # 统一转 jpg
-                    
-                    dst_path = os.path.join(images_dir, new_name)
-                    # 移动到外层
-                    try:
-                        shutil.move(found_src, dst_path)
-                    except: pass
+                branch = row.get("分行名称", "未知分行").strip()
+                manager = row.get("客户经理名称", "未知经理").strip()
+                fund = row.get("基金产品名称", "未知产品").strip()
+                safe_name = f"{branch}_{manager}_{fund}".replace("/", "_").replace("\\", "_").replace(":", "")
+                dst_path = os.path.join(images_dir, f"{safe_name}.jpg")
+                files_map[slide_idx] = dst_path
 
-            # 2.2 处理战报页 (count+1 ~ end)
-            zhanbao_index = 1
-            while True:
-                slide_idx = count + zhanbao_index
-                found_src = None
-                for ext in [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG"]:
-                    t_path = os.path.join(actual_temp_dir, f"Slide{slide_idx}{ext}")
-                    if os.path.exists(t_path):
-                        found_src = t_path
-                        break
+            # 2. 战报页 (count+1 ~ ???)
+            # 我们无法预知有多少战报页，除非打开PPT。
+            # 但我们可以告诉 Windows 转换函数：如果有更多页，就命名为 "战报_x.jpg"
+            
+            # --- 分平台处理 ---
+            if sys.platform == "win32":
+                # Windows (包含 WPS): 推荐使用逐页导出 (Slide.Export)
+                # 这样最稳定，不需要临时文件夹，也不会有存盘失败的问题
+                self._convert_win32_direct(pptx_path, files_map, images_dir, count)
+            else:
+                # Mac: 保持原有的 "全部导出 -> 重命名" 逻辑
+                self._convert_mac_workflow(pptx_path, files_map, images_dir, count)
                 
-                if not found_src:
-                    break
-                    
-                dst_path = os.path.join(images_dir, f"战报_{zhanbao_index}.jpg")
-                try:
-                    shutil.move(found_src, dst_path)
-                except: pass
-                
-                zhanbao_index += 1
-
-            # 3. 清理临时文件夹
-            if actual_temp_dir != images_dir and os.path.exists(actual_temp_dir):
-                try:
-                    shutil.rmtree(actual_temp_dir)
-                except: pass
-
             self.root.after(0, lambda: self._finish_all(pptx_path, count, images_dir))
             
         except Exception as e:
             err = str(e)
             print("Convert Error:", err)
-            msg = f"PPT生成成功({count}人)，但导出图片失败。\n可能原因：未安装Office或权限不足。\n错误: {err}"
+            msg = f"PPT生成成功({count}人)，但导出图片失败。\n需安装Office/WPS。\n错误: {err}"
             self.root.after(0, lambda: messagebox.showwarning("部分完成", msg))
             self.root.after(0, lambda: self._finish_all(pptx_path, count))
+
+    def _convert_win32_direct(self, pptx_path, files_map, output_dir, count):
+        import win32com.client
+        
+        pptx_path = os.path.abspath(pptx_path)
+        
+        # 尝试连接 PowerPoint 或 WPS
+        try:
+            app = win32com.client.Dispatch("PowerPoint.Application")
+        except:
+            # 尝试 WPS 专门的 ProgID
+            try:
+                app = win32com.client.Dispatch("Kwpp.Application")
+            except:
+                raise Exception("无法调用 PowerPoint 或 WPS，请确认已安装。")
+        
+        # app.Visible = True # 调试时可开启
+        
+        try:
+            presentation = app.Presentations.Open(pptx_path, WithWindow=False)
+            
+            for i, slide in enumerate(presentation.Slides):
+                idx = i + 1
+                
+                # 确定输出路径
+                if idx in files_map:
+                    target_path = files_map[idx]
+                else:
+                    # 超过数据的部分，认为是战报
+                    # 战报索引 = idx - count
+                    zhanbao_idx = idx - count
+                    if zhanbao_idx < 1: zhanbao_idx = 1 # 防御性
+                    target_path = os.path.join(output_dir, f"战报_{zhanbao_idx}.jpg")
+                
+                # 确保路径是绝对路径
+                target_path = os.path.abspath(target_path)
+                
+                # 逐页导出
+                # FilterName="JPG", ScaleWidth/Height (可选)
+                # WPS 和 Office 都支持 Export
+                slide.Export(target_path, "JPG")
+                
+            presentation.Close()
+        except Exception as e:
+            # 尝试退出 app 吗？通常建议不要 Quit 用户打开的 App
+            # app.Quit() 
+            raise e
+
+    def _convert_mac_workflow(self, pptx_path, files_map, images_dir, count):
+        # Mac 依然使用 AppleScript 全量导出 + 重命名
+        # 1. 导出到临时文件夹
+        temp_dir = os.path.join(images_dir, "temp_export_mac")
+        if not os.path.exists(temp_dir): os.makedirs(temp_dir)
+        
+        # 清空 temp
+        import shutil
+        for f in os.listdir(temp_dir):
+            try: os.remove(os.path.join(temp_dir, f))
+            except: pass
+            
+        self._convert_mac(pptx_path, temp_dir)
+        
+        # 2. 重命名并移动
+        # 遍历 temp_dir 里的 SlideX.jpg
+        # 注意: Mac 可能生成 Slide1.JPG, Slide 1.jpg, etc.
+        # 我们直接按照 Slide Index 找文件
+        
+        for idx in range(1, 9999): # 假设上限
+            # 寻找 Slide{idx}.*
+            found_src = None
+            for ext in [".jpg", ".JPG", ".jpeg", ".JPEG", ".png", ".PNG"]:
+                t_path = os.path.join(temp_dir, f"Slide{idx}{ext}")
+                if os.path.exists(t_path):
+                    found_src = t_path
+                    break
+            
+            if not found_src:
+                break # 找不到 Slide N，说明结束了
+            
+            # 确定目标名
+            if idx in files_map:
+                dst_path = files_map[idx]
+            else:
+                zhanbao_idx = idx - count
+                if zhanbao_idx < 1: zhanbao_idx = 1
+                dst_path = os.path.join(images_dir, f"战报_{zhanbao_idx}.jpg")
+            
+            try:
+                shutil.move(found_src, dst_path)
+            except: pass
+            
+        # 3. 清理
+        try: shutil.rmtree(temp_dir)
+        except: pass
 
     def _finish_all(self, output_path, count, images_dir=None):
         self.gen_btn.config(state="normal", text="🚀 一键生成完整报告")
