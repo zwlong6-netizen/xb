@@ -549,10 +549,10 @@ class AllReportsApp:
         
         tk.Label(dl_frame, text="📥 模版下载:", font=FONT_LABEL, fg=COLOR_TEXT, bg=COLOR_CARD).pack(side="left")
         
-        tk.Button(dl_frame, text="数据模版", command=self._download_data_template,
-                  font=("微软雅黑", 9), relief="flat", bg="#F0F0F0", cursor="hand2").pack(side="left", padx=10)
-        
         tk.Button(dl_frame, text="喜报模版", command=self._download_xibao_template,
+                  font=("微软雅黑", 9), relief="flat", bg="#F0F0F0", cursor="hand2").pack(side="left", padx=10)
+
+        tk.Button(dl_frame, text="数据模版", command=self._download_data_template,
                   font=("微软雅黑", 9), relief="flat", bg="#F0F0F0", cursor="hand2").pack(side="left", padx=5)
 
         # 进度条
