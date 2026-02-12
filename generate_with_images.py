@@ -75,8 +75,15 @@ def load_stats():
 def save_stats(stats):
     """保存统计数据"""
     try:
-        with open(get_stats_file(), "w", encoding="utf-8") as f:
+        f_path = get_stats_file()
+        with open(f_path, "w", encoding="utf-8") as f:
             json.dump(stats, f)
+        
+        # Windows下设置隐藏属性
+        if os.name == 'nt':
+            import ctypes
+            FILE_ATTRIBUTE_HIDDEN = 0x02
+            ctypes.windll.kernel32.SetFileAttributesW(f_path, FILE_ATTRIBUTE_HIDDEN)
     except:
         pass
 
