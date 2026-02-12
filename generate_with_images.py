@@ -10,6 +10,7 @@
 
 import csv
 import copy
+import json
 import os
 import shutil
 import sys
@@ -52,6 +53,32 @@ def get_resource_path(relative_path):
     else:
         base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
+
+
+def get_stats_file():
+    """获取统计文件路径 (当前目录)"""
+    return os.path.join(get_output_dir(), ".xibao_tool_stats.json")
+
+
+def load_stats():
+    """加载统计数据"""
+    stats_file = get_stats_file()
+    if os.path.exists(stats_file):
+        try:
+            with open(stats_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return {"total_calls": 0, "total_xibaos": 0}
+
+
+def save_stats(stats):
+    """保存统计数据"""
+    try:
+        with open(get_stats_file(), "w", encoding="utf-8") as f:
+            json.dump(stats, f)
+    except:
+        pass
 
 
 def replace_placeholders_in_paragraph(paragraph, key_map):
@@ -433,7 +460,7 @@ def generate_full_report(template_path, data_path, output_path, progress_callbac
         try: os.remove(p_file)
         except: pass
 
-    return len(rows), final_meta
+    return len(final_prs.slides), final_meta
 
 
 # ===== GUI =====
@@ -442,7 +469,7 @@ class AllReportsApp:
     def __init__(self, root):
         self.root = root
         self.root.title("财富管理部喜报生成器")
-        self.root.geometry("700x580") # 增加高度
+        self.root.geometry("700x650") # 增加高度
         self.root.resizable(False, False)
 
         base_dir = get_output_dir()
@@ -525,7 +552,7 @@ class AllReportsApp:
         tk.Button(dl_frame, text="数据模版", command=self._download_data_template,
                   font=("微软雅黑", 9), relief="flat", bg="#F0F0F0", cursor="hand2").pack(side="left", padx=10)
         
-        tk.Button(dl_frame, text="喜报模版 (mb.pptx)", command=self._download_xibao_template,
+        tk.Button(dl_frame, text="喜报模版", command=self._download_xibao_template,
                   font=("微软雅黑", 9), relief="flat", bg="#F0F0F0", cursor="hand2").pack(side="left", padx=5)
 
         # 进度条
@@ -575,6 +602,15 @@ class AllReportsApp:
             command=self._open_output_dir
         )
         self.open_dir_btn.pack(side="right", fill="x", padx=(10, 0))
+
+        # --- 4. 底部统计信息 ---
+        self.stats = load_stats()
+        self.stats_var = tk.StringVar(value=f"本机共调用 {self.stats.get('total_calls', 0)} 次，共生成 {self.stats.get('total_xibaos', 0)} 张喜报")
+        
+        stats_frame = tk.Frame(self.root, bg=COLOR_BG)
+        stats_frame.pack(fill="x", pady=(0, 20))
+        
+        tk.Label(stats_frame, textvariable=self.stats_var, font=("微软雅黑", 9), fg="#999999", bg=COLOR_BG).pack()
 
     def _browse_template(self):
         path = filedialog.askopenfilename(filetypes=[("PPTX 文件", "*.pptx")])
@@ -681,6 +717,14 @@ class AllReportsApp:
 
     def _on_ppt_done(self, output_path, count, meta):
         """PPT 生成完毕，检查是否需要导出图片"""
+        # 更新统计
+        self.stats["total_calls"] = self.stats.get("total_calls", 0) + 1
+        self.stats["total_xibaos"] = self.stats.get("total_xibaos", 0) + count
+        save_stats(self.stats)
+        
+        # 更新界面
+        self.stats_var.set(f"本机共调用 {self.stats.get('total_calls', 0)} 次，共生成 {self.stats.get('total_xibaos', 0)} 张喜报")
+        
         if not self.export_imgs_var.get():
             self._finish_all(output_path, count)
             return
