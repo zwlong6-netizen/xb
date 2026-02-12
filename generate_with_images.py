@@ -11,6 +11,7 @@
 import csv
 import copy
 import os
+import shutil
 import sys
 import threading
 import tkinter as tk
@@ -36,11 +37,21 @@ FIELD_MAP = {
 ROWS_PER_PAGE_ZHANBAO = 9
 
 
-def get_base_dir():
-    """获取程序运行的基础目录（用于存放生成的输出文件和读取模版）"""
+def get_output_dir():
+    """获取输出目录（可执行文件所在目录）"""
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def get_resource_path(relative_path):
+    """获取资源文件绝对路径（支持开发环境和打包后的环境）"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller 将资源解压到临时文件夹
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
 
 
 def replace_placeholders_in_paragraph(paragraph, key_map):
@@ -434,9 +445,10 @@ class AllReportsApp:
         self.root.geometry("700x580") # 增加高度
         self.root.resizable(False, False)
 
-        base_dir = get_base_dir()
-        self.default_template = os.path.join(base_dir, "data", "all.pptx")
-        self.default_data = os.path.join(base_dir, "data", "data.csv")
+        base_dir = get_output_dir()
+        # 默认从内嵌资源中寻找模板
+        self.default_template = get_resource_path(os.path.join("data", "all.pptx"))
+        self.default_data = get_resource_path(os.path.join("data", "data.csv"))
         self.last_output_dir = base_dir
 
         self._build_ui()
@@ -503,6 +515,18 @@ class AllReportsApp:
 
         create_input_row(card_frame, "喜报模板文件 (PPTX)", self.template_var, self._browse_template)
         create_input_row(card_frame, "数据源文件 (CSV/XLSX)", self.data_var, self._browse_data)
+
+        # 下载模版链接
+        dl_frame = tk.Frame(card_frame, bg=COLOR_CARD)
+        dl_frame.pack(fill="x", pady=5)
+        
+        tk.Label(dl_frame, text="📥 模版下载:", font=FONT_LABEL, fg=COLOR_TEXT, bg=COLOR_CARD).pack(side="left")
+        
+        tk.Button(dl_frame, text="数据模版", command=self._download_data_template,
+                  font=("微软雅黑", 9), relief="flat", bg="#F0F0F0", cursor="hand2").pack(side="left", padx=10)
+        
+        tk.Button(dl_frame, text="喜报模版 (mb.pptx)", command=self._download_xibao_template,
+                  font=("微软雅黑", 9), relief="flat", bg="#F0F0F0", cursor="hand2").pack(side="left", padx=5)
 
         # 进度条
         style = ttk.Style()
@@ -592,7 +616,7 @@ class AllReportsApp:
                 base_name = os.path.splitext(os.path.basename(data_file))[0]
                 file_name = f"财富管理部喜报_{base_name}.pptx"
             
-            output = os.path.join(get_base_dir(), file_name)
+            output = os.path.join(get_output_dir(), file_name)
         except Exception as e:
             messagebox.showerror("错误", f"读取数据失败: {e}")
             return
@@ -616,6 +640,44 @@ class AllReportsApp:
         self.progress["value"] = (current / total) * 100
         self.status_var.set(msg)
         self.root.update_idletasks()
+
+    def _download_data_template(self):
+        """下载数据模版"""
+        src = get_resource_path(os.path.join("data", "data.xlsx"))
+        if not os.path.exists(src):
+            messagebox.showerror("错误", f"找不到源文件: {src}")
+            return
+            
+        dst = filedialog.asksaveasfilename(
+            title="保存数据模版",
+            initialfile="data.xlsx",
+            filetypes=[("Excel 文件", "*.xlsx")]
+        )
+        if dst:
+            try:
+                shutil.copy(src, dst)
+                messagebox.showinfo("成功", f"文件已保存到:\n{dst}")
+            except Exception as e:
+                messagebox.showerror("错误", f"保存失败: {e}")
+
+    def _download_xibao_template(self):
+        """下载喜报模版"""
+        src = get_resource_path(os.path.join("data", "mb.pptx"))
+        if not os.path.exists(src):
+            messagebox.showerror("错误", f"找不到源文件: {src}")
+            return
+
+        dst = filedialog.asksaveasfilename(
+            title="保存喜报模版",
+            initialfile="mb.pptx",
+            filetypes=[("PPTX 文件", "*.pptx")]
+        )
+        if dst:
+            try:
+                shutil.copy(src, dst)
+                messagebox.showinfo("成功", f"文件已保存到:\n{dst}")
+            except Exception as e:
+                messagebox.showerror("错误", f"保存失败: {e}")
 
     def _on_ppt_done(self, output_path, count, meta):
         """PPT 生成完毕，检查是否需要导出图片"""
@@ -814,8 +876,8 @@ class AllReportsApp:
         if images_dir:
             msg += f"\n图片已保存至子文件夹"
             
-        self.status_var.set(msg.replace("\n", " "))
-        self.last_output_dir = os.path.dirname(output_path) or get_base_dir()
+        self.status_var.set(f"✅ 完成！文件已保存")
+        self.last_output_dir = os.path.dirname(output_path) or get_output_dir()
         # messagebox.showinfo("成功", msg) # 之前说不要弹窗
 
     def _on_error(self, err):
