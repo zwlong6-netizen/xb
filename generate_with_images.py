@@ -469,7 +469,7 @@ class AllReportsApp:
     def __init__(self, root):
         self.root = root
         self.root.title("财富管理部喜报生成器")
-        self.root.geometry("700x650") # 增加高度
+        self.root.geometry("800x680") # 增加高度
         self.root.resizable(False, False)
 
         base_dir = get_output_dir()
