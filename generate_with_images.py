@@ -557,13 +557,13 @@ class AllReportsApp:
 
         # --- 3. 底部 Action 区域 ---
         action_frame = tk.Frame(self.root, bg=COLOR_BG)
-        action_frame.pack(fill="x", pady=20, padx=40)
+        action_frame.pack(fill="x", pady=(5, 20), padx=40)
 
         self.gen_btn = tk.Button(
             action_frame, text="🔥 生成完整喜报",
             font=FONT_BTN_LARGE, bg=COLOR_PRIMARY, fg="white",
             activebackground=COLOR_BTN_HOVER, activeforeground="white",
-            relief="flat", cursor="hand2", padx=20, pady=10,
+            relief="flat", cursor="hand2", padx=20, pady=15,
             command=self._on_generate
         )
         self.gen_btn.pack(side="left", fill="x", expand=True, padx=(0, 10))
@@ -571,7 +571,7 @@ class AllReportsApp:
         self.open_dir_btn = tk.Button(
             action_frame, text="📂 打开输出文件夹",
             font=FONT_BTN_SMALL, bg="#E0E0E0", fg=COLOR_TEXT,
-            relief="flat", cursor="hand2", padx=20, pady=12,
+            relief="flat", cursor="hand2", padx=20, pady=15,
             command=self._open_output_dir
         )
         self.open_dir_btn.pack(side="right", fill="x", padx=(10, 0))
