@@ -76,16 +76,29 @@ def save_stats(stats):
     """保存统计数据"""
     try:
         f_path = get_stats_file()
+        
+        # Windows下需先取消隐藏属性才能写入
+        if os.name == 'nt' and os.path.exists(f_path):
+            try:
+                import ctypes
+                FILE_ATTRIBUTE_NORMAL = 0x80
+                ctypes.windll.kernel32.SetFileAttributesW(f_path, FILE_ATTRIBUTE_NORMAL)
+            except:
+                pass
+
         with open(f_path, "w", encoding="utf-8") as f:
             json.dump(stats, f)
         
         # Windows下设置隐藏属性
         if os.name == 'nt':
-            import ctypes
-            FILE_ATTRIBUTE_HIDDEN = 0x02
-            ctypes.windll.kernel32.SetFileAttributesW(f_path, FILE_ATTRIBUTE_HIDDEN)
-    except:
-        pass
+            try:
+                import ctypes
+                FILE_ATTRIBUTE_HIDDEN = 0x02
+                ctypes.windll.kernel32.SetFileAttributesW(f_path, FILE_ATTRIBUTE_HIDDEN)
+            except:
+                pass
+    except Exception as e:
+        print(f"Stats save error: {e}")
 
 
 def replace_placeholders_in_paragraph(paragraph, key_map):
@@ -143,11 +156,23 @@ def copy_slides_from_pptx(target_prs, source_pptx_path):
         for rel in src_slide.part.rels.values():
             if "slideLayout" in rel.reltype:
                 continue
-            try:
-                new_rId = new_slide.part.relate_to(rel.target_part, rel.reltype)
-                rId_map[rel.rId] = new_rId
-            except ValueError:
-                pass
+            
+            # 检查目标 slide 是否已经存在相同的关联 (避免重复添加导致 Duplicate name 警告)
+            # 这对于 media/image 等资源尤为重要
+            existing_rel = None
+            for existing in new_slide.part.rels.values():
+                if existing.reltype == rel.reltype and existing.target_part == rel.target_part:
+                    existing_rel = existing
+                    break
+            
+            if existing_rel:
+                 rId_map[rel.rId] = existing_rel.rId
+            else:
+                try:
+                    new_rId = new_slide.part.relate_to(rel.target_part, rel.reltype)
+                    rId_map[rel.rId] = new_rId
+                except ValueError:
+                    pass
 
         for child in src_slide._element:
             new_element = copy.deepcopy(child)
@@ -176,8 +201,19 @@ def read_data_file(file_path):
         wb.close()
         if len(data) < 2:
             return []
-        headers = [str(h).strip() for h in data[0]]
-        return [{headers[j]: (str(cell) if cell is not None else "") for j, cell in enumerate(row)} for row in data[1:] if any(cell is not None for cell in row)]
+        headers = [str(h).strip() if h is not None else f"Column_{j}" for j, h in enumerate(data[0])]
+        result = []
+        for row in data[1:]:
+            # 过滤全空行
+            if not any(cell is not None for cell in row):
+                continue
+            item = {}
+            for j, cell in enumerate(row):
+                if j < len(headers):
+                    val = str(cell) if cell is not None else ""
+                    item[headers[j]] = val.strip() # Strip cell values too
+            result.append(item)
+        return result
 
     elif ext == ".xls":
         import xlrd
@@ -186,7 +222,20 @@ def read_data_file(file_path):
         if ws.nrows < 2:
             return []
         headers = [str(ws.cell_value(0, c)).strip() for c in range(ws.ncols)]
-        return [{headers[j]: str(ws.cell_value(r, j)) for j in range(ws.ncols)} for r in range(1, ws.nrows)]
+        result = []
+        for r in range(1, ws.nrows):
+            row_dict = {}
+            for c in range(ws.ncols):
+                cell_val = ws.cell_value(r, c)
+                if ws.cell_type(r, c) == xlrd.XL_CELL_DATE:
+                    try:
+                        dt_tuple = xlrd.xldate_as_tuple(cell_val, wb.datemode)
+                        cell_val = datetime(*dt_tuple).strftime("%Y/%m/%d")
+                    except:
+                        pass
+                row_dict[headers[c]] = str(cell_val).strip()
+            result.append(row_dict)
+        return result
 
     else:
         raise ValueError(f"不支持的文件格式: {ext}\n请使用 .csv / .xlsx / .xls 文件")
@@ -199,6 +248,7 @@ def get_date_range(rows):
         if not date_str:
             continue
         for fmt in ("%Y/%m/%d", "%Y-%m-%d", "%Y.%m.%d",
+                     "%Y年%m月%d日",
                      "%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
             try:
                 dt = datetime.strptime(date_str.split()[0], fmt.split()[0])
@@ -220,9 +270,14 @@ def group_data_for_zhanbao(rows):
     for row in rows:
         key = (row.get("分行名称", ""), row.get("基金产品名称", ""))
         try:
-            amount = float(row.get("销售额", "0").replace(",", ""))
+            # 清理金额字符串: 去除千分位逗号，去除空格，去除全角空格
+            amount_str = row.get("销售额", "0").replace(",", "").replace("，", "").strip()
+            # 处理可能的非数字字符（仅保留数字和小数点以及负号）
+            import re
+            amount_str = re.sub(r'[^\d\.\-]', '', amount_str)
+            amount = float(amount_str) if amount_str else 0.0
         except ValueError:
-            amount = 0
+            amount = 0.0
         groups[key] += amount
 
     result = []
@@ -390,83 +445,80 @@ def generate_full_report(template_path, data_path, output_path, progress_callbac
     if not rows:
         raise ValueError("数据文件中没有数据")
 
-    output_dir = os.path.dirname(output_path) or "."
-    
-    if progress_callback:
-        progress_callback(0, 100, "正在分析模板...")
-        
-    split_templates = split_template_by_slides(template_path, output_dir)
-    
-    part_info_list = [] # List of (file_path, meta_list)
-    
-    for i, tmpl_path in enumerate(split_templates):
-        prs = Presentation(tmpl_path)
-        t_type = detect_template_type(prs)
-        
+    # 使用临时目录存放中间文件，避免污染用户目录
+    import tempfile
+    with tempfile.TemporaryDirectory() as temp_dir:
         if progress_callback:
-            progress_callback(i * (100 // len(split_templates)), 100, f"正在处理模板页 {i+1} ({t_type})...")
+            progress_callback(0, 100, "正在分析模板...")
             
-        part_file = None
-        current_meta = []
+        split_templates = split_template_by_slides(template_path, temp_dir)
         
-        if t_type == "INDIVIDUAL":
-            part_file = process_individual_template(tmpl_path, rows, output_dir, i)
-            # 生成了 len(rows) 张幻灯片
-            if part_file:
-                 for r_idx in range(len(rows)):
-                     current_meta.append({"type": "individual", "row_idx": r_idx})
+        part_info_list = [] # List of (file_path, meta_list)
         
-        elif t_type == "SUMMARY":
-            # 战报可能有多页，需要计算
-            grouped = group_data_for_zhanbao(rows)
-            # 计算页数 (虽然 process_summary_template 会处理，但我们需要 meta)
-            # 最准确的方法是读取生成的 PPT
-            part_file = process_summary_template(tmpl_path, rows, output_dir, i)
+        for i, tmpl_path in enumerate(split_templates):
+            prs = Presentation(tmpl_path)
+            t_type = detect_template_type(prs)
             
-            if part_file:
-                 try:
-                     tmp_p = Presentation(part_file)
-                     real_count = len(tmp_p.slides)
-                     for _ in range(real_count):
-                         current_meta.append({"type": "summary"})
-                 except:
-                     pass
+            if progress_callback:
+                progress_callback(i * (100 // len(split_templates)), 100, f"正在处理模板页 {i+1} ({t_type})...")
+                
+            part_file = None
+            current_meta = []
+            
+            if t_type == "INDIVIDUAL":
+                part_file = process_individual_template(tmpl_path, rows, temp_dir, i)
+                # 生成了 len(rows) 张幻灯片
+                if part_file:
+                     for r_idx in range(len(rows)):
+                         current_meta.append({"type": "individual", "row_idx": r_idx})
+            
+            elif t_type == "SUMMARY":
+                # 战报可能有多页，需要计算
+                grouped = group_data_for_zhanbao(rows)
+                # 计算页数 (虽然 process_summary_template 会处理，但我们需要 meta)
+                # 最准确的方法是读取生成的 PPT
+                part_file = process_summary_template(tmpl_path, rows, temp_dir, i)
+                
+                if part_file:
+                     try:
+                         tmp_p = Presentation(part_file)
+                         real_count = len(tmp_p.slides)
+                         for _ in range(real_count):
+                             current_meta.append({"type": "summary"})
+                     except:
+                         pass
 
-        else:
-            part_file = os.path.join(output_dir, f"part_{i}.pptx")
-            prs.save(part_file)
-            current_meta.append({"type": "static"})
-            
-        if part_file and os.path.exists(part_file):
-            part_info_list.append((part_file, current_meta))
-            
-        try: os.remove(tmpl_path)
-        except: pass
+            else:
+                part_file = os.path.join(temp_dir, f"part_{i}.pptx")
+                prs.save(part_file)
+                current_meta.append({"type": "static"})
+                
+            if part_file and os.path.exists(part_file):
+                part_info_list.append((part_file, current_meta))
+                
+            # split_templates在temp_dir内，会被自动清理，无需手动删除
+            # try: os.remove(tmpl_path)
+            # except: pass
 
-    if progress_callback:
-        progress_callback(90, 100, "正在合并所有部分...")
+        if progress_callback:
+            progress_callback(90, 100, "正在合并所有部分...")
+            
+        if not part_info_list:
+            return 0, []
+
+        # 合并
+        first_file, first_meta = part_info_list[0]
+        final_prs = Presentation(first_file)
+        final_meta = list(first_meta)
         
-    if not part_info_list:
-        return 0, []
-
-    # 合并
-    first_file, first_meta = part_info_list[0]
-    final_prs = Presentation(first_file)
-    final_meta = list(first_meta)
+        for p_file, p_meta in part_info_list[1:]:
+            copy_slides_from_pptx(final_prs, p_file)
+            final_meta.extend(p_meta)
+            
+        final_prs.save(output_path)
     
-    for p_file, p_meta in part_info_list[1:]:
-        copy_slides_from_pptx(final_prs, p_file)
-        final_meta.extend(p_meta)
-        
-    final_prs.save(output_path)
+    # 退出 with block 后，temp_dir 自动删除
     
-    # 清理分块文件
-    try: os.remove(first_file)
-    except: pass
-    for p_file, _ in part_info_list[1:]:
-        try: os.remove(p_file)
-        except: pass
-
     return len(final_prs.slides), final_meta
 
 
@@ -830,7 +882,7 @@ class AllReportsApp:
             
         except Exception as e:
             err = str(e)
-            print("Convert Error:", err)
+            print(f"Convert Error: {err}")
             msg = f"PPT生成成功({count}人)，但导出图片失败。\n需安装Office/WPS。\n错误: {err}"
             self.root.after(0, lambda: messagebox.showwarning("部分完成", msg))
             self.root.after(0, lambda: self._finish_all(pptx_path, count))
@@ -851,36 +903,36 @@ class AllReportsApp:
         
         try:
             presentation = app.Presentations.Open(pptx_path, WithWindow=False)
-            
-            # 获取原始尺寸 (Points)
-            sw = presentation.PageSetup.SlideWidth
-            sh = presentation.PageSetup.SlideHeight
-            
-            # 提高分辨率: 设置导出倍数
-            # 默认可能是 96DPI，甚至更低。设为 4 倍通常能达到高清效果
-            scale = 4
-            out_w = int(sw * scale)
-            out_h = int(sh * scale)
-            
-            for i, slide in enumerate(presentation.Slides):
-                idx = i + 1
+            try:
+                # 获取原始尺寸 (Points)
+                sw = presentation.PageSetup.SlideWidth
+                sh = presentation.PageSetup.SlideHeight
                 
-                if idx in files_map:
-                    target_path = files_map[idx]
-                else:
-                    # 不再应该发生，因为 files_map 覆盖了 static
-                    target_path = os.path.join(output_dir, f"Extra_Slide_{idx}.jpg")
+                # 提高分辨率: 设置导出倍数
+                # 默认可能是 96DPI，甚至更低。设为 4 倍通常能达到高清效果
+                scale = 4
+                out_w = int(sw * scale)
+                out_h = int(sh * scale)
                 
-                target_path = os.path.abspath(target_path)
-                
-                try:
-                    # 尝试高清导出: slide.Export(FileName, FilterName, ScaleWidth, ScaleHeight)
-                    slide.Export(target_path, "JPG", out_w, out_h)
-                except:
-                    # 如果 WPS 或某些版本不支持宽高参数，回退到默认导出
-                    slide.Export(target_path, "JPG")
-                
-            presentation.Close()
+                for i, slide in enumerate(presentation.Slides):
+                    idx = i + 1
+                    
+                    if idx in files_map:
+                        target_path = files_map[idx]
+                    else:
+                        # 不再应该发生，因为 files_map 覆盖了 static
+                        target_path = os.path.join(output_dir, f"Extra_Slide_{idx}.jpg")
+                    
+                    target_path = os.path.abspath(target_path)
+                    
+                    try:
+                        # 尝试高清导出: slide.Export(FileName, FilterName, ScaleWidth, ScaleHeight)
+                        slide.Export(target_path, "JPG", out_w, out_h)
+                    except:
+                        # 如果 WPS 或某些版本不支持宽高参数，回退到默认导出
+                        slide.Export(target_path, "JPG")
+            finally:
+                presentation.Close()
         except Exception as e:
             raise e
 
@@ -937,22 +989,7 @@ class AllReportsApp:
         self.status_var.set(f"出错: {err}")
         messagebox.showerror("失败", f"生成出错:\n{err}")
 
-    def _convert_win32(self, pptx_path, output_dir):
-        import win32com.client
-        
-        pptx_path = os.path.abspath(pptx_path)
-        output_dir = os.path.abspath(output_dir)
-        
-        powerpoint = win32com.client.Dispatch("PowerPoint.Application")
-        # powerpoint.Visible = True 
-        try:
-            presentation = powerpoint.Presentations.Open(pptx_path, WithWindow=False)
-            # ppSaveAsJPG = 17
-            presentation.SaveAs(os.path.join(output_dir, "Slide.jpg"), 17)
-            presentation.Close()
-        finally:
-            # powerpoint.Quit() # 慎用Quit
-            pass
+
 
     def _convert_mac(self, pptx_path, output_dir):
         pptx_path = os.path.abspath(pptx_path)
