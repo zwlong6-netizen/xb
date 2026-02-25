@@ -22,17 +22,11 @@ from datetime import datetime
 import subprocess
 
 from pptx import Presentation
+from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.util import Pt
 
 
 R_NAMESPACE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-
-# 喜报占位符
-FIELD_MAP = {
-    "{{分行名称}}": "分行名称",
-    "{{客户经理名称}}": "客户经理名称",
-    "{{销售额}}": "销售额",
-    "{{基金名称}}": "基金产品名称",
-}
 
 # 战报每页行数
 ROWS_PER_PAGE_ZHANBAO = 9
@@ -101,23 +95,71 @@ def save_stats(stats):
         print(f"Stats save error: {e}")
 
 
-def replace_placeholders_in_paragraph(paragraph, key_map):
-    runs = paragraph.runs
-    i = 0
-    while i < len(runs):
-        if "{{" in runs[i].text and i + 2 < len(runs):
-            potential_key = runs[i + 1].text
-            if potential_key in key_map and "}}" in runs[i + 2].text:
-                runs[i].text = runs[i].text.replace("{{", "")
-                runs[i + 1].text = key_map[potential_key]
-                runs[i + 2].text = runs[i + 2].text.replace("}}", "")
-                i += 2
-                continue
-        for key, value in key_map.items():
-            placeholder = "{{" + key + "}}"
-            if placeholder in runs[i].text:
-                runs[i].text = runs[i].text.replace(placeholder, value)
-        i += 1
+def replace_placeholders_in_paragraph(paragraph, key_map, shape=None):
+    text = paragraph.text
+    if not text:
+        return False
+
+    needs_replacement = False
+    
+    for key, value in key_map.items():
+        placeholder = "{{" + key + "}}"
+        if placeholder in text:
+            val_str = str(value)
+            text = text.replace(placeholder, val_str)
+            needs_replacement = True
+
+    if needs_replacement and paragraph.runs:
+        # 获取最原始的字号（如果有）
+        original_size_pt = None
+        for run in paragraph.runs:
+            if run.font.size is not None:
+                original_size_pt = run.font.size.pt
+                break
+        
+        # 如果 run 上没有字号，尝试取段落级的字号
+        if original_size_pt is None and paragraph.font.size is not None:
+            original_size_pt = paragraph.font.size.pt
+            
+        # 如果还是没有，假定一个默认的合理字号
+        if original_size_pt is None:
+            original_size_pt = 18.0
+            
+        # 将文本放进第一个 run 并清除后面的
+        paragraph.runs[0].text = text
+        for i in range(1, len(paragraph.runs)):
+            paragraph.runs[i].text = ""
+            
+        # 估算宽度，决定是否要缩小字体
+        # python-pptx 没有排版引擎，我们通过计算文本所需的物理宽度来判断是否会换行
+        if shape and hasattr(shape, "width") and shape.width:
+            # 计算可是范围的可用宽度(减去左右边距)
+            tf = getattr(shape, "text_frame", None)
+            margin_left = tf.margin_left.pt if tf and tf.margin_left else 7.2
+            margin_right = tf.margin_right.pt if tf and tf.margin_right else 7.2
+            available_width_pt = shape.width.pt - margin_left - margin_right
+            
+            # 计算文本估算宽度 (中文按1倍，英文数字按0.55倍)
+            text_width_pt = 0.0
+            for ch in text:
+                if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+                    text_width_pt += original_size_pt
+                else:
+                    text_width_pt += original_size_pt * 0.55
+                    
+            if text_width_pt > available_width_pt and available_width_pt > 0:
+                # 只有当宽度溢出时，我们才按照比例进行缩小
+                ratio = available_width_pt / text_width_pt
+                new_size_pt = original_size_pt * ratio * 0.95 # 乘以0.95安全系数留点余量
+                if new_size_pt < 8:
+                    new_size_pt = 8
+                paragraph.runs[0].font.size = Pt(new_size_pt)
+            else:
+                paragraph.runs[0].font.size = Pt(original_size_pt)
+        else:
+            paragraph.runs[0].font.size = Pt(original_size_pt)
+            
+    return needs_replacement
 
 
 def replace_text_in_slide(slide, replacements):
@@ -128,13 +170,26 @@ def replace_text_in_slide(slide, replacements):
 
     for shape in slide.shapes:
         if shape.has_text_frame:
+            replaced_any = False
             for paragraph in shape.text_frame.paragraphs:
-                replace_placeholders_in_paragraph(paragraph, key_map)
+                if replace_placeholders_in_paragraph(paragraph, key_map, shape):
+                    replaced_any = True
+            
+            if replaced_any:
+                # 开启原生的 PowerPoint 文本自动缩放功能（如果不换行则缩小字体）
+                shape.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+                shape.text_frame.word_wrap = False
 
 
 def replace_text_in_cell(cell, key_map):
+    replaced_any = False
     for paragraph in cell.text_frame.paragraphs:
-        replace_placeholders_in_paragraph(paragraph, key_map)
+        if replace_placeholders_in_paragraph(paragraph, key_map):
+            replaced_any = True
+            
+    if replaced_any:
+        # 针对表格单元格不支持直接 auto_size，可以关闭 word_wrap 来尽量单行
+        cell.text_frame.word_wrap = False
 
 
 def copy_slides_from_pptx(target_prs, source_pptx_path):
@@ -268,7 +323,13 @@ def get_date_range(rows):
 def group_data_for_zhanbao(rows):
     groups = defaultdict(float)
     for row in rows:
-        key = (row.get("分行名称", ""), row.get("基金产品名称", ""))
+        fund_name = row.get("基金名称", "")
+        if not fund_name:
+            fund_name = row.get("基金产品名称", "")
+        if not fund_name:
+            fund_name = row.get("产品名称", "")
+            
+        key = (row.get("分行名称", ""), fund_name)
         try:
             # 清理金额字符串: 去除千分位逗号，去除空格，去除全角空格
             amount_str = row.get("销售额", "0").replace(",", "").replace("，", "").strip()
@@ -349,7 +410,7 @@ def split_template_by_slides(template_path, temp_dir):
     return split_files
 
 
-def detect_template_type(prs):
+def detect_template_type(prs, headers=None):
     text_content = ""
     for slide in prs.slides:
         for shape in slide.shapes:
@@ -361,13 +422,16 @@ def detect_template_type(prs):
                     for cell in row.cells:
                         text_content += cell.text_frame.text
     
-    if "{{分行名称}}" in text_content or "{{客户经理名称}}" in text_content or "{{基金名称}}" in text_content:
-        if "{{数据开始日期}}" in text_content:
-            return "SUMMARY"
-        return "INDIVIDUAL"
-    
-    elif "{{数据开始日期}}" in text_content or "{{销售总额}}" in text_content:
+    if "{{数据开始日期}}" in text_content or "{{销售总额}}" in text_content:
         return "SUMMARY"
+        
+    if headers:
+        for h in headers:
+            if f"{{{{{h}}}}}" in text_content:
+                return "INDIVIDUAL"
+                
+    if "{{分行名称}}" in text_content or "{{客户经理名称}}" in text_content or "{{基金名称}}" in text_content:
+        return "INDIVIDUAL"
         
     return "STATIC"
 
@@ -376,7 +440,8 @@ def process_individual_template(template_path, rows, output_dir, index):
     row_temps = []
     for k, row in enumerate(rows):
         p = Presentation(template_path) 
-        replacements = {ph: row[col] for ph, col in FIELD_MAP.items()}
+        # 动态将所有表头作为占位符
+        replacements = {f"{{{{{col}}}}}": str(val) for col, val in row.items()}
         replace_text_in_slide(p.slides[0], replacements)
         t_path = os.path.join(output_dir, f"_part_{index}_row_{k}.pptx")
         p.save(t_path)
@@ -452,12 +517,13 @@ def generate_full_report(template_path, data_path, output_path, progress_callbac
             progress_callback(0, 100, "正在分析模板...")
             
         split_templates = split_template_by_slides(template_path, temp_dir)
+        headers = list(rows[0].keys()) if rows else []
         
         part_info_list = [] # List of (file_path, meta_list)
         
         for i, tmpl_path in enumerate(split_templates):
             prs = Presentation(tmpl_path)
-            t_type = detect_template_type(prs)
+            t_type = detect_template_type(prs, headers)
             
             if progress_callback:
                 progress_callback(i * (100 // len(split_templates)), 100, f"正在处理模板页 {i+1} ({t_type})...")
