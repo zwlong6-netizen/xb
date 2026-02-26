@@ -355,10 +355,20 @@ def group_data_for_zhanbao(rows):
 
 
 def fill_zhanbao_slide(slide, page_data, start_date, end_date):
-    date_key_map = {
-        "数据开始日期": start_date,
-        "数据结束日期": end_date,
-    }
+    if start_date == end_date:
+        # 如果开始和结束日期相同，可以用特殊占位符或者把结束日期置空/同名处理
+        date_key_map = {
+            "数据开始日期": start_date,
+            "数据结束日期": "",
+            # 可选：如果你有专用的 {{数据日期}} 占位符
+            "数据日期": start_date 
+        }
+    else:
+        date_key_map = {
+            "数据开始日期": start_date,
+            "数据结束日期": end_date,
+            "数据日期": f"{start_date}-{end_date}"
+        }
     for shape in slide.shapes:
         if shape.has_text_frame:
             for paragraph in shape.text_frame.paragraphs:
@@ -422,7 +432,7 @@ def detect_template_type(prs, headers=None):
                     for cell in row.cells:
                         text_content += cell.text_frame.text
     
-    if "{{数据开始日期}}" in text_content or "{{销售总额}}" in text_content:
+    if "{{数据开始日期}}" in text_content or "{{数据日期}}" in text_content or "{{销售总额}}" in text_content:
         return "SUMMARY"
         
     if headers:
@@ -599,8 +609,8 @@ class AllReportsApp:
 
         base_dir = get_output_dir()
         # 默认从内嵌资源中寻找模板
-        self.default_template = get_resource_path(os.path.join("data", "all.pptx"))
-        self.default_data = get_resource_path(os.path.join("data", "data.csv"))
+        self.default_template = get_resource_path(os.path.join("data1", "mb.pptx"))
+        self.default_data = get_resource_path(os.path.join("data1", "data.xlsx"))
         self.last_output_dir = base_dir
 
         self._build_ui()
@@ -772,12 +782,22 @@ class AllReportsApp:
             
             start_date, end_date = get_date_range(rows)
             if start_date and end_date:
-                file_name = f"财富管理部喜报({start_date}-{end_date}).pptx"
+                if start_date == end_date:
+                    base_name_gen = f"财富管理部喜报({start_date})"
+                else:
+                    base_name_gen = f"财富管理部喜报({start_date}-{end_date})"
             else:
                 base_name = os.path.splitext(os.path.basename(data_file))[0]
-                file_name = f"财富管理部喜报_{base_name}.pptx"
+                base_name_gen = f"财富管理部喜报_{base_name}"
             
+            # 处理文件重名，自动加 (1), (2)
+            file_name = f"{base_name_gen}.pptx"
             output = os.path.join(get_output_dir(), file_name)
+            counter = 1
+            while os.path.exists(output):
+                file_name = f"{base_name_gen}({counter}).pptx"
+                output = os.path.join(get_output_dir(), file_name)
+                counter += 1
         except Exception as e:
             messagebox.showerror("错误", f"读取数据失败: {e}")
             return
@@ -804,7 +824,7 @@ class AllReportsApp:
 
     def _download_data_template(self):
         """下载数据模版"""
-        src = get_resource_path(os.path.join("data", "data.xlsx"))
+        src = get_resource_path(os.path.join("data1", "data.xlsx"))
         if not os.path.exists(src):
             messagebox.showerror("错误", f"找不到源文件: {src}")
             return
@@ -823,7 +843,7 @@ class AllReportsApp:
 
     def _download_xibao_template(self):
         """下载喜报模版"""
-        src = get_resource_path(os.path.join("data", "mb.pptx"))
+        src = get_resource_path(os.path.join("data1", "mb.pptx"))
         if not os.path.exists(src):
             messagebox.showerror("错误", f"找不到源文件: {src}")
             return
@@ -863,10 +883,16 @@ class AllReportsApp:
     def _convert_to_images_thread(self, pptx_path, count, meta):
         try:
             base_name_no_ext = os.path.splitext(os.path.basename(pptx_path))[0]
-            images_dir = os.path.join(os.path.dirname(pptx_path), f"{base_name_no_ext}_导出图片")
+            base_images_dir_name = f"{base_name_no_ext}_导出图片"
+            images_dir = os.path.join(os.path.dirname(pptx_path), base_images_dir_name)
             
-            if not os.path.exists(images_dir):
-                os.makedirs(images_dir)
+            # 处理文件夹重名，自动加 (1), (2)
+            dir_counter = 1
+            while os.path.exists(images_dir):
+                images_dir = os.path.join(os.path.dirname(pptx_path), f"{base_images_dir_name}({dir_counter})")
+                dir_counter += 1
+            
+            os.makedirs(images_dir)
             
             # --- 预先构建每一页及其对应的目标文件名 ---
             data_file = self.data_var.get()
@@ -878,7 +904,10 @@ class AllReportsApp:
             # 获取日期范围用于战报命名
             start_date, end_date = get_date_range(rows)
             if start_date and end_date:
-                zhanbao_base_name = f"战报({start_date}-{end_date})"
+                if start_date == end_date:
+                    zhanbao_base_name = f"战报({start_date})"
+                else:
+                    zhanbao_base_name = f"战报({start_date}-{end_date})"
             else:
                 zhanbao_base_name = "战报"
                 
