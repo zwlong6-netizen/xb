@@ -984,8 +984,12 @@ class AllReportsApp:
 
     def _convert_win32_direct(self, pptx_path, files_map, output_dir):
         import win32com.client
+        import gc
         
         pptx_path = os.path.abspath(pptx_path)
+        
+        app = None
+        presentation = None
         
         # 尝试连接 PowerPoint 或 WPS
         try:
@@ -998,38 +1002,46 @@ class AllReportsApp:
         
         try:
             presentation = app.Presentations.Open(pptx_path, WithWindow=False)
+            
+            # 获取原始尺寸 (Points)
+            sw = presentation.PageSetup.SlideWidth
+            sh = presentation.PageSetup.SlideHeight
+            
+            # 提高分辨率: 设置导出倍数
+            scale = 4
+            out_w = int(sw * scale)
+            out_h = int(sh * scale)
+            
+            for i, slide in enumerate(presentation.Slides):
+                idx = i + 1
+                
+                if idx in files_map:
+                    target_path = files_map[idx]
+                else:
+                    target_path = os.path.join(output_dir, f"Extra_Slide_{idx}.jpg")
+                
+                target_path = os.path.abspath(target_path)
+                
+                try:
+                    slide.Export(target_path, "JPG", out_w, out_h)
+                except:
+                    slide.Export(target_path, "JPG")
+        finally:
+            # 彻底释放 COM 对象，避免残留进程导致第二次调用失败
             try:
-                # 获取原始尺寸 (Points)
-                sw = presentation.PageSetup.SlideWidth
-                sh = presentation.PageSetup.SlideHeight
-                
-                # 提高分辨率: 设置导出倍数
-                # 默认可能是 96DPI，甚至更低。设为 4 倍通常能达到高清效果
-                scale = 4
-                out_w = int(sw * scale)
-                out_h = int(sh * scale)
-                
-                for i, slide in enumerate(presentation.Slides):
-                    idx = i + 1
-                    
-                    if idx in files_map:
-                        target_path = files_map[idx]
-                    else:
-                        # 不再应该发生，因为 files_map 覆盖了 static
-                        target_path = os.path.join(output_dir, f"Extra_Slide_{idx}.jpg")
-                    
-                    target_path = os.path.abspath(target_path)
-                    
-                    try:
-                        # 尝试高清导出: slide.Export(FileName, FilterName, ScaleWidth, ScaleHeight)
-                        slide.Export(target_path, "JPG", out_w, out_h)
-                    except:
-                        # 如果 WPS 或某些版本不支持宽高参数，回退到默认导出
-                        slide.Export(target_path, "JPG")
-            finally:
-                presentation.Close()
-        except Exception as e:
-            raise e
+                if presentation:
+                    presentation.Close()
+            except:
+                pass
+            try:
+                if app:
+                    app.Quit()
+            except:
+                pass
+            # 释放 COM 引用
+            presentation = None
+            app = None
+            gc.collect()
 
     def _convert_mac_workflow(self, pptx_path, files_map, images_dir):
         # Mac 依然使用 AppleScript 全量导出 + 重命名
