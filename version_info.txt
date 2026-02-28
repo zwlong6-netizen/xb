@@ -22,7 +22,6 @@ VSVersionInfo(
             StringStruct(u'InternalName', u'XibaoTool'),
             StringStruct(u'OriginalFilename', u'XibaoTool.exe'),
             StringStruct(u'ProductName', u'财富管理部喜报生成器'),
-            StringStruct(u'ProductVersion', u'1.0.0'),
             StringStruct(u'LegalCopyright', u'由信息科技部-大数据研发室-周文龙制作'),
             StringStruct(u'Comments', u'财富管理部喜报生成器——简单、快速、自动化的喜报生成工具'),
           ]
