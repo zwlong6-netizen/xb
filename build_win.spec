@@ -73,7 +73,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,  # onedir 模式
-    name='喜报生成器',
+    name='XibaoTool',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -93,5 +93,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name='喜报生成器',
+    name='XibaoTool',
 )

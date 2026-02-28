@@ -21,7 +21,6 @@ jobs:
     - name: 安装 VC++ Redistributable
       shell: powershell
       run: |
-        # 下载并安装 VC++ 2015-2022 Redistributable，确保运行时 DLL 可被打包
         $url = "https://aka.ms/vs/17/release/vc_redist.x64.exe"
         $out = "$env:TEMP\vc_redist.x64.exe"
         Invoke-WebRequest -Uri $url -OutFile $out
@@ -40,13 +39,13 @@ jobs:
     - name: 创建启动脚本
       shell: cmd
       run: |
-        echo @echo off > "dist\喜报生成器\启动喜报工具.bat"
-        echo cd /d "%%~dp0" >> "dist\喜报生成器\启动喜报工具.bat"
-        echo start "" "喜报生成器.exe" >> "dist\喜报生成器\启动喜报工具.bat"
+        echo @echo off > "dist\XibaoTool\启动喜报工具.bat"
+        echo cd /d "%%~dp0" >> "dist\XibaoTool\启动喜报工具.bat"
+        echo start "" "_internal\XibaoTool.exe" >> "dist\XibaoTool\启动喜报工具.bat"
 
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
       with:
         name: XibaoTool-Windows
-        path: "dist/喜报生成器/"
+        path: "dist/XibaoTool/"
         compression-level: 9
