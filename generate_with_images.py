@@ -927,7 +927,7 @@ class AllReportsApp:
                         row = rows[r_idx]
                         branch = row.get("分行名称", "未知分行").strip()
                         manager = row.get("客户经理名称", "未知经理").strip()
-                        fund = row.get("基金产品名称", "未知产品").strip()
+                        fund = row.get("基金名称", "").strip() or row.get("基金产品名称", "").strip() or row.get("产品名称", "未知产品").strip()
                         safe_name = f"{branch}_{manager}_{fund}".replace("/", "_").replace("\\", "_").replace(":", "")
                         
                         # 如果有重复名字（比如同一个人的两个不同模板生成了2页），需要区分
