@@ -62,23 +62,22 @@ jobs:
         Get-ChildItem "$internal\*.dll" | ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
 
     - name: 创建启动脚本
-      shell: powershell
+      shell: python
       run: |
-        # 启动脚本（设置 PATH 确保 DLL 可被找到）
-        @"
-        @echo off
-        cd /d "%~dp0"
-        set PATH=%~dp0;%~dp0_internal;%PATH%
-        start "" "XibaoTool.exe"
-        "@ | Out-File -FilePath "dist\XibaoTool\双击启动.bat" -Encoding ascii
+        import os
+        dist = os.path.join("dist", "XibaoTool")
 
-        # 使用说明
-        @"
-        === 喜报生成器 使用说明 ===
-        直接双击【双击启动.bat】即可运行，无需安装任何软件。
-        如果 bat 无法运行，请尝试直接双击 XibaoTool.exe。
-        注意：请将整个文件夹解压后再运行，不要直接在压缩包内打开！
-        "@ | Out-File -FilePath "dist\XibaoTool\使用说明.txt" -Encoding utf8
+        with open(os.path.join(dist, "start.bat"), "w", encoding="ascii") as f:
+            f.write('@echo off\r\n')
+            f.write('cd /d "%~dp0"\r\n')
+            f.write('set PATH=%~dp0;%~dp0_internal;%PATH%\r\n')
+            f.write('start "" "XibaoTool.exe"\r\n')
+
+        with open(os.path.join(dist, "readme.txt"), "w", encoding="utf-8-sig") as f:
+            f.write("=== 喜报生成器 使用说明 ===\r\n\r\n")
+            f.write("直接双击【start.bat】即可运行，无需安装任何软件。\r\n")
+            f.write("如果 bat 无法运行，请尝试直接双击 XibaoTool.exe。\r\n")
+            f.write("注意：请将整个文件夹解压后再运行，不要直接在压缩包内打开！\r\n")
 
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
