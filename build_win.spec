@@ -62,8 +62,6 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=True,  # 打包私有程序集，避免依赖系统 DLL
     cipher=block_cipher,
     noarchive=False,
 )
