@@ -3,8 +3,6 @@ name: 打包 Windows 版本
 on:
   push:
     branches: [ "main", "master" ]
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch: # 支持手动触发
 
 jobs:
@@ -26,11 +24,13 @@ jobs:
         pip install python-pptx openpyxl xlrd pyinstaller pywin32
 
     - name: 使用 PyInstaller 打包
+      shell: cmd
       run: |
-        pyinstaller --noconsole --onefile --hidden-import=win32com.client --add-data "data;data" --name "财富管理部喜报工具" generate_with_images.py
+        pyinstaller --noconsole --onedir --hidden-import=win32com.client --hidden-import=openpyxl --hidden-import=xlrd --add-data "data1;data1" --name "喜报生成器" generate_with_images.py
 
     - name: 上传构建产物
       uses: actions/upload-artifact@v4
       with:
-        name: XibaoTool-Images-Windows
-        path: "dist/财富管理部喜报工具.exe"
+        name: XibaoTool-Windows
+        path: "dist/喜报生成器/"
+        compression-level: 9
