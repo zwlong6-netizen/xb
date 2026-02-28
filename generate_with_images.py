@@ -881,6 +881,9 @@ class AllReportsApp:
         threading.Thread(target=self._convert_to_images_thread, args=(output_path, count, meta)).start()
 
     def _convert_to_images_thread(self, pptx_path, count, meta):
+        # COM 在子线程中必须显式初始化，否则第二次调用会失败
+        import pythoncom
+        pythoncom.CoInitialize()
         try:
             base_name_no_ext = os.path.splitext(os.path.basename(pptx_path))[0]
             base_images_dir_name = f"{base_name_no_ext}_导出图片"
@@ -981,6 +984,8 @@ class AllReportsApp:
             msg = f"PPT生成成功({count}人)，但导出图片失败。\n需安装Office/WPS。\n错误: {err}"
             self.root.after(0, lambda: messagebox.showwarning("部分完成", msg))
             self.root.after(0, lambda: self._finish_all(pptx_path, count))
+        finally:
+            pythoncom.CoUninitialize()
 
     def _convert_win32_direct(self, pptx_path, files_map, output_dir):
         import win32com.client
